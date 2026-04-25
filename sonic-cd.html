@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sonic CD</title>
   <link rel="icon" type="image/x-icon" href="scd.ico">
+  <script src="coi-serviceworker.js"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -322,7 +323,7 @@
    next to index.html instead of CDN.
    Expected local files: RSDKv3.js, RSDKv3.wasm, lib/RSDKv3.js
    ============================================================ */
-const DEV_MODE = false;
+const DEV_MODE = true;
 
 const CDN_BASE     = 'https://cdn.jsdelivr.net/gh/ant9012/sonic-cd-standalone-html@main/';
 const CDN_FILES_JS = CDN_BASE + 'Files.js';
@@ -330,7 +331,7 @@ const CDN_LIB_RSDK = CDN_BASE + 'lib/RSDKv3.js';
 const CDN_RSDK_JS  = CDN_BASE + 'RSDKv3.js';
 
 const LIB_RSDK = DEV_MODE ? './lib/RSDKv3.js' : CDN_LIB_RSDK;
-const RSDK_JS  = DEV_MODE ? './RSDKv3.js'      : CDN_RSDK_JS;
+const RSDK_JS  = DEV_MODE ? './RSDKv3-sw.js'      : CDN_RSDK_JS;
 
 /* ============================================================
    Console buffer
