@@ -645,10 +645,12 @@ const EngineFS = (() => {
 window.EngineFS = EngineFS;
 
 window.TS_InitFS = async function(id, callback) {
+  // IDBFS was already mounted and synced in Module.preRun before the engine
+  // started — by the time TS_InitFS is called the files are already in the FS.
+  // We just need to update EngineFS's tracked fspath and call back.
   try {
-    console.log('[TS_InitFS] re-mounting IDBFS for engine:', id);
-    await window.EngineFS.Init(id);
-    console.log('[TS_InitFS] ready');
+    window.EngineFS.fspath = '/' + id;
+    console.log('[TS_InitFS] ready (IDBFS pre-mounted)');
     callback();
   } catch(e) {
     console.error('[TS_InitFS] failed:', e);
@@ -867,6 +869,24 @@ window.addEventListener('DOMContentLoaded', () => {
             return DEV_MODE ? ('./' + path) : (CDN_BASE + path);
           return prefix + path;
         };
+
+        // Mount IDBFS and sync it as a run dependency so the engine waits
+        // for all mod files to be available before RSDK_Initialize is called.
+        // This runs in parallel with wasm compilation — much faster than
+        // doing syncfs(true) inside TS_InitFS after the engine has started.
+        Module.preRun = Module.preRun || [];
+        Module.preRun.push(function() {
+          const id = 'RSDKv3';
+          setSplashStatus('Loading mod files...');
+          if (!FS.analyzePath('/' + id).exists) FS.mkdir(id);
+          FS.mount(IDBFS, { root: '/' + id }, id);
+          addRunDependency('idbfs-sync');
+          FS.syncfs(true, function(err) {
+            if (err) console.error('[preRun] IDBFS sync failed:', err);
+            else console.log('[preRun] IDBFS sync complete');
+            removeRunDependency('idbfs-sync');
+          });
+        });
       })
       .then(() => loadScript(RSDK_JS))
       .catch(err => {
