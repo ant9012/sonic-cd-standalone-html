@@ -449,8 +449,29 @@ const EngineFS = (() => {
     if (!FS.analyzePath('/' + id).exists) FS.mkdir(id);
     FS.mount(IDBFS, { root: '/' + id }, id);
     activeMount = id;
-    await new Promise((res, rej) => FS.syncfs(true, e => e ? rej(e) : res()));
     fspath = '/' + id;
+    // syncfs(true) pulls files from IndexedDB — don't await here.
+    // With large mods this takes minutes and would block the Launch button.
+    // We kick it off and let it complete in the background; the engine's
+    // preRun hook does its own syncfs before RSDK_Initialize is called,
+    // so game files are always available by the time the engine needs them.
+    return new Promise((res, rej) => FS.syncfs(true, e => {
+      if (e) rej(e); else res();
+    }));
+  }
+
+  async function InitMount(id) {
+    // Mount-only variant: makes IDBFS visible immediately so the file
+    // manager can show existing files, then kicks off the background sync.
+    if (activeMount) { try { FS.unmount(activeMount); } catch(e) {} activeMount = null; }
+    if (!FS.analyzePath('/' + id).exists) FS.mkdir(id);
+    FS.mount(IDBFS, { root: '/' + id }, id);
+    activeMount = id;
+    fspath = '/' + id;
+    // Fire-and-forget — errors are non-fatal in launcher mode
+    FS.syncfs(true, e => {
+      if (e) console.error('[EngineFS] background sync failed:', e);
+    });
   }
 
   function Save() {
@@ -817,14 +838,18 @@ async function fm_dropDir(dirEntry, parentDir) {
    ============================================================ */
 async function fsReady() {
   try {
+    // Mount IDBFS immediately so the Launch button is available right away.
+    // syncfs runs in the background — we don't block on it. The file list
+    // will populate once sync completes (large mods can take a while).
+    await EngineFS.InitMount('RSDKv3');
     document.getElementById('fm-loading').style.display = 'none';
-    await EngineFS.Init('RSDKv3');
     fm_setEnabled(true);
-    await fm_refresh();
     setSplashStatus('Ready — press Launch Game to start');
     document.getElementById('launch-btn').disabled = false;
+    // Refresh the file list once background sync finishes
+    EngineFS.Init('RSDKv3').then(() => fm_refresh()).catch(() => fm_refresh());
   } catch(e) {
-    console.error('[Launcher] EngineFS.Init failed:', e);
+    console.error('[Launcher] EngineFS init failed:', e);
     document.getElementById('fm-loading').innerHTML =
       '<div style="color:var(--red);font-size:11px;padding:8px">FS init failed: ' + e.message + '</div>';
   }
