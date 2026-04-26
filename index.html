@@ -546,13 +546,28 @@ const EngineFS = (() => {
         if (cur.length > 1 && !FS.analyzePath(cur).exists) { try { FS.mkdir(cur); } catch(e) {} }
       }
     }
-    await Promise.all(files.map(async ({ path, entry }) => {
-      const data = await entry.async('uint8array');
-      const dir = path.substring(0, path.lastIndexOf('/'));
-      if (dir.length > 1 && !FS.analyzePath(dir).exists) { try { FS.mkdir(dir); } catch(e) {} }
-      FS.writeFile(path, data, { encoding: 'binary' });
-    }));
-    await Save();
+    // Process files sequentially in batches to avoid loading the entire
+    // mod into memory at once. Promise.all on a large zip exhausts memory
+    // and produces one enormous IDBFS transaction that chokes the browser.
+    // Batching keeps peak RAM low and spreads IndexedDB writes out.
+    const BATCH_SIZE = 20;
+    const total = files.length;
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      for (const { path, entry } of batch) {
+        const data = await entry.async('uint8array');
+        const dir = path.substring(0, path.lastIndexOf('/'));
+        if (dir.length > 1 && !FS.analyzePath(dir).exists) { try { FS.mkdir(dir); } catch(e) {} }
+        FS.writeFile(path, data, { encoding: 'binary' });
+      }
+      // Sync after each batch — keeps each IDBFS transaction small and
+      // saves progress incrementally so a browser crash doesn't lose everything.
+      progressUpdate(
+        'Saving... (' + Math.min(i + BATCH_SIZE, total) + '/' + total + ' files)',
+        ((i + BATCH_SIZE) / total) * 100
+      );
+      await Save();
+    }
   }
 
   async function DirectoryCreate(name) {
